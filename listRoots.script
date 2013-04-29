@@ -5,12 +5,28 @@
 #FuseESB:karaf@root> zk:get
 #Error executing command: java.lang.NullPointerException
 
-rootNodes = (zk:list | tac)
 addcommand arrays (($.context bundle) loadClass java.util.Arrays)
 addcommand system (($.context bundle) loadClass java.lang.System)
 
 eol = system:getProperty "line.separator"
-rootNodesArray = $rootNodes split $eol
-rootNodesList = (arrays:asList $rootNodesArray)
+asList = {
+	# split a string by lines into a list 
+	lineArray = $it split $eol;
+	arrays:asList $lineArray;
+}
 
-each $rootNodesList {echo $it " foo"}
+
+# Get a list of container names that the ZK registry thinks the Fabric should have
+zkContainers = {
+	containersRoot = "fabric/configs/containers/"
+	containerPaths = (zk:list -r | grep $containersRoot | tac)
+	containerPathsList = asList $containerPaths
+
+	containers = []
+	each $containerPathsList {
+		$containers add ($1 replace $containersRoot "")
+	}
+	$containers
+}
+
+each (zkContainers) {echo "container: " $it}
