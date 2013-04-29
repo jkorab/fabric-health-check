@@ -2,31 +2,58 @@
 # containers without versions
 # versions without container nodes
 
-#FuseESB:karaf@root> zk:get
-#Error executing command: java.lang.NullPointerException
+# TODO address missing commands
+# FuseESB:karaf@root> zk:get
+# Error executing command: java.lang.NullPointerException
 
 addcommand arrays (($.context bundle) loadClass java.util.Arrays)
 addcommand system (($.context bundle) loadClass java.lang.System)
 
-eol = system:getProperty "line.separator"
+EOL = system:getProperty "line.separator"
+CONTAINERS_ROOT = "fabric/configs/containers/"
+VERSIONS_ROOT = "fabric/configs/versions/"
+
+# Split a string by lines into a list of Strings. 
 asList = {
-	# split a string by lines into a list 
-	lineArray = $it split $eol;
+	lineArray = $it split $EOL;
 	arrays:asList $lineArray;
 }
 
-
 # Get a list of container names that the ZK registry thinks the Fabric should have
-zkContainers = {
-	containersRoot = "fabric/configs/containers/"
-	containerPaths = (zk:list -r | grep $containersRoot | tac)
+fabricContainers = {
+	containerPaths = (zk:list -r | grep $CONTAINERS_ROOT | tac)
 	containerPathsList = asList $containerPaths
 
 	containers = []
 	each $containerPathsList {
-		$containers add ($1 replace $containersRoot "")
+		$containers add ($1 replace $CONTAINERS_ROOT "")
 	}
 	$containers
 }
 
-each (zkContainers) {echo "container: " $it}
+# Get a list of versions that the ZK registry thinks the Fabric should have
+fabricVersions = {
+	versionsPaths = (zk:list -r | grep $VERSIONS_ROOT | grep -v profiles | grep -v containers | grep -v general | tac)
+	versionsPathsList = asList $versionsPaths
+
+	versions = []
+	each $versionsPathsList {
+		$versions add ($1 replace $VERSIONS_ROOT "")
+	}
+	$versions
+}
+
+echo "Fabric Containers"
+each (fabricContainers) {echo $it}
+echo "" 
+echo "Fabric Versions"
+each (fabricVersions) {echo $it}
+
+# TODO make this a map of Strings:List
+containerVersions = []
+each (fabricContainers) {
+	container = $it
+	containerVersionsPaths = (zk:list -r | grep $VERSIONS_ROOT | grep "containers" | tac)
+	containerVersions = asList $containerVersionsPaths
+}
+each $containerVersions {echo "x:" $it}	
