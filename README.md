@@ -13,5 +13,5 @@ To run the script, save it in the `$ESB_HOME` directory, connect to the ESB cons
     
 # Fabric ZK Issues Fixed
 1. Fabric containers not assigned to versions. Can occasionally happen when creating and deleting nodes from the Fabric. Fix is to delete the server entry from the registry.
-2. Versions that have been imported do not have a containers node and so mess up any containers that are upgraded to them - create one.
-3. When a child container is created in a Fabric after a version has been created, an upgrade of the child to the version corrupts the `fabric:` commands.
+2. Versions that have been imported do not have a containers node and so mess up any containers that are upgraded to them. Fix is to create one.
+3. When a child container is created in a Fabric after a version has been created, an upgrade of the child to the version corrupts the `fabric:` commands. Fix is to create the container in the version node and assign it to the `default` profile.
