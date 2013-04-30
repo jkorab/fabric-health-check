@@ -1,7 +1,7 @@
 # Fixes the following issues with the Zookeeper registry:
 # containers without versions
 # versions without container nodes
-echo "[Fabric Zookeeper Check]"
+echo "[Fabric Registry Health Check]"
 
 addcommand arrays (($.context bundle) loadClass java.util.Arrays)
 addcommand system (($.context bundle) loadClass java.lang.System)
@@ -90,9 +90,10 @@ fixOrphanedContainers = {
 	fixCount = (new java.util.concurrent.atomic.AtomicInteger)
 	each (fabricContainers) {
 		container = $it
-		containerVersionsPaths = (zk:list -r | grep --color=never $VERSIONS_ROOT | grep "containers" | tac)
+		containerVersionsPaths = (zk:list -r | grep --color=never $VERSIONS_ROOT | grep "containers" | grep $container | tac)
 		containerVersions = asList $containerVersionsPaths
-		if {$containerVersions isEmpty} {
+		# the grep command returns a blank line if nothing matched
+		if {$containerVersions contains ""} {
 			echo $LIST_INDENT $container "Orphaned"
 			removeContainerFromZk $container
 			($fixCount incrementAndGet)
