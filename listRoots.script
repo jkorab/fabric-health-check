@@ -9,6 +9,7 @@
 addcommand arrays (($.context bundle) loadClass java.util.Arrays)
 addcommand system (($.context bundle) loadClass java.lang.System)
 addcommand bigint (($.context bundle) loadClass java.math.BigInteger)
+addcommand pattern (($.context bundle) loadClass java.util.regex.Pattern)
 
 EOL = system:getProperty "line.separator"
 CONTAINERS_ROOT = "fabric/configs/containers/"
@@ -33,43 +34,35 @@ concat = {
 TREE_INDENT = concat $INDENT $INDENT_BRANCH
 LIST_INDENT = $INDENT
 
+trimWhiteSpace = {
+	nonWhiteSpace = (pattern:compile "([a-zA-Z0-9_\-]*).*")
+	matcher = ($nonWhiteSpace matcher $it)
+	if {$matcher matches} {
+		retval = $matcher group 1
+	} {
+		retval = $it
+	}
+	$retval	
+}
+
 # Get a list of container names that the ZK registry thinks the Fabric should have
 fabricContainers = {
-	containerPaths = (zk:list -r | grep $CONTAINERS_ROOT | tac)
+	containerPaths = (zk:list -r | grep --color=never $CONTAINERS_ROOT | tac)
 	containerPathsList = asList $containerPaths
 	
-	# DEBUG ---
-	containerPathsListSize = ($containerPathsList size)
-	echo "containerPathsListSize" ($containerPathsListSize toString) 
-	# ---
-
 	containers = []
 	each $containerPathsList {
-		echo (($1 length) toString)
-		echo (($CONTAINERS_ROOT length) toString)
-		containerName = (($1 trim) replace $CONTAINERS_ROOT "")
-		echo (($containerName length) toString)
-
-
-		if {$containerName matches ".*root.*"} {
-			echo "yes"
-		} {
-			echo "no"
-			$containers add $containerName	
-		}
+		containerNameUntrimmed = ($1 replace $CONTAINERS_ROOT "")
+		containerName = (trimWhiteSpace $containerNameUntrimmed)
+		$containers add $containerName	
 	}
 
-	# DEBUG ---
-	containersSize = ($containers size)
-	echo "containersSize" ($containersSize toString) 
-	# ---
-	
 	$containers
 }
 
 # Get a list of versions that the ZK registry thinks the Fabric should have
 fabricVersions = {
-	versionsPaths = (zk:list -r | grep $VERSIONS_ROOT | grep -v profiles | grep -v containers | grep -v general | tac)
+	versionsPaths = (zk:list -r | grep --color=never $VERSIONS_ROOT | grep -v profiles | grep -v containers | grep -v general | tac)
 	versionsPathsList = asList $versionsPaths
 
 	versions = []
@@ -100,25 +93,19 @@ fixOrphanedContainers = {
 	fixCount = (new java.util.concurrent.atomic.AtomicInteger)
 	each (fabricContainers) {
 		container = $it
-		containerVersionsPaths = (zk:list -r | grep $VERSIONS_ROOT | grep "containers" | tac)
+		containerVersionsPaths = (zk:list -r | grep --color=never $VERSIONS_ROOT | grep "containers" | tac)
 		containerVersions = asList $containerVersionsPaths
 		if {$containerVersions isEmpty} {
 			echo $LIST_INDENT $container "Orphaned"
-		} {
-			echo $LIST_INDENT $container "OK"
 			removeContainerFromZk $container
 			($fixCount incrementAndGet)
+		} {
+			echo $LIST_INDENT $container "OK"
 		}
 	}
 	echo $INDENT "Problems found and fixed:" ($fixCount toString)
 }
 
+echo "[Fabric Zookeeper Check]"
 echoFabricDetails
 fixOrphanedContainers
-
-
-#Checking for containers without versions...
-#   cont1 - OK
-#   cont2 - Orphaned
-#       Removing container details from ZK registry [ fabric/configs/containers/cont2 ]
-#   Problems found and corrected: 1
