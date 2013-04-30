@@ -32,7 +32,7 @@ TREE_INDENT = concat $INDENT $INDENT_BRANCH
 LIST_INDENT = $INDENT
 
 trimWhiteSpace = {
-	nonWhiteSpace = (pattern:compile "([a-zA-Z0-9_\-]*).*")
+	nonWhiteSpace = (pattern:compile "([a-zA-Z0-9_\-\.]*).*")
 	matcher = ($nonWhiteSpace matcher $it)
 	if {$matcher matches} {
 		retval = $matcher group 1
@@ -56,6 +56,7 @@ fabricContainers = {
 
 	$containers
 }
+FABRIC_CONTAINERS = (fabricContainers)
 
 # Get a list of versions that the ZK registry thinks the Fabric should have
 fabricVersions = {
@@ -64,45 +65,129 @@ fabricVersions = {
 
 	versions = []
 	each $versionsPathsList {
-		$versions add ($1 replace $VERSIONS_ROOT "")
+		versionUntrimmed = ($1 replace $VERSIONS_ROOT "")
+		version = (trimWhiteSpace $versionUntrimmed)
+		$versions add $version
 	}
 	$versions
 }
+FABRIC_VERSIONS = (fabricVersions)
 
 echoFabricDetails = {
 	echo "Fabric Containers"
-	each (fabricContainers) {echo $TREE_INDENT $it}
+	each ($FABRIC_CONTAINERS) {echo $TREE_INDENT $it}
 	echo "" 
 	echo "Fabric Versions"
-	each (fabricVersions) {echo $TREE_INDENT $it}
+	each ($FABRIC_VERSIONS) {echo $TREE_INDENT $it}
 	echo "" 
 }
 
 removeContainerFromZk = {
 	containerName = $it
 	containerPath = (concat $CONTAINERS_ROOT $containerName)
-	echo "Removing container details from ZK registry [" $containerPath "]"
+	echo $LIST_INDENT "Removing container details from ZK registry [" $containerPath "]"
 	zk:delete $containerPath
 }
 
+# When constantly adding and removing child containers, a container can lose version information.
 fixOrphanedContainers = {
-	echo "Checking for containers without versions..."
-	fixCount = (new java.util.concurrent.atomic.AtomicInteger)
-	each (fabricContainers) {
+	each ($FABRIC_CONTAINERS) {
 		container = $it
 		containerVersionsPaths = (zk:list -r | grep --color=never $VERSIONS_ROOT | grep "containers" | grep $container | tac)
 		containerVersions = asList $containerVersionsPaths
 		# the grep command returns a blank line if nothing matched
 		if {$containerVersions contains ""} {
-			echo $LIST_INDENT $container "Orphaned"
+			echo $LIST_INDENT $container "- Orphaned"
 			removeContainerFromZk $container
-			($fixCount incrementAndGet)
+			($FIX_COUNT incrementAndGet)
 		} {
-			echo $LIST_INDENT $container "OK"
+			echo $LIST_INDENT $container "- OK"
 		}
 	}
-	echo $INDENT "Problems found and fixed:" ($fixCount toString)
+}
+
+addVersionContainersNodeToZk = {
+	version = $it
+	versionContainerPath = (concat (concat $VERSIONS_ROOT $version) "/containers")
+	echo $LIST_INDENT "Creating containers node in ZK registry [" $versionContainerPath "]"
+	zk:create $versionContainerPath
+}
+
+# Versions that have been imported do not have a containers node and so mess up any 
+# containers that are upgraded to them - create one. 
+# To test:
+#    fabric:version-create
+#    zk:delete fabric/configs/versions/1.1/containers/root
+#    zk:delete fabric/configs/versions/1.1/containers
+#    <run this script>
+fixIncorrectlyImportedVersions = {
+	each ($FABRIC_VERSIONS) {
+		version = $it
+		versionContainerPaths = (zk:list -r | grep --color=never $VERSIONS_ROOT | grep "containers" | grep $version | tac)
+		versionContainers = asList $versionContainerPaths
+		# the grep command returns a blank line if nothing matched
+		if {$versionContainers contains ""} {
+			echo $LIST_INDENT $version "- Unable to mount containers"
+			addVersionContainersNodeToZk $version
+			($FIX_COUNT incrementAndGet)
+		} {
+			echo $LIST_INDENT $version "- OK"
+		}
+	}
+}
+
+
+
+addContainerOnVersionNodeToZk = {
+	container = $1
+	version = $2
+	containerOnVersionPath = (concat (concat (concat $VERSIONS_ROOT $version) "/containers/") $container)
+	echo $LIST_INDENT "Creating container version node in ZK registry [" $containerOnVersionPath "]"
+	zk:create $containerOnVersionPath
+	echo $LIST_INDENT "Setting [" $containerOnVersionPath "] profile to default"
+	zk:set $containerOnVersionPath default
+}
+
+# When a child container is created in a Fabric after a version has been created, an upgrade
+# of the child to the version corrupts the fabric: commands.
+# To test:
+#    fabric:version-create
+#    fabric:container-create-child root child 1
+#    fabric:version-upgrade 1.1 child
+#    container:list
+#         Error executing command: org.apache.zookeeper.KeeperException$NoNodeException:
+#         KeeperErrorCode = NoNode for /fabric/configs/versions/1.1/containers/child
+#    <run this script>
+fixMissingContainersOnVersions = {
+	each ($FABRIC_VERSIONS) {
+		version = $it
+		versionContainerRoot = (concat (concat $VERSIONS_ROOT $version) "/containers/")
+		each ($FABRIC_CONTAINERS) {
+			container = $it
+			containerVersionPaths = (zk:list -r | grep --color=never $versionContainerRoot | grep $container | tac)
+			containerVersionPath = asList $containerVersionPaths
+			# the grep command returns a blank line if nothing matched
+			if {$containerVersionPath contains ""} {
+				echo $LIST_INDENT $version ":" $container "missing"
+				addContainerOnVersionNodeToZk $container $version
+				($FIX_COUNT incrementAndGet)
+			} {
+				echo $LIST_INDENT $version ":" $container "OK"
+			}		
+		}
+	}
 }
 
 echoFabricDetails
+FIX_COUNT = (new java.util.concurrent.atomic.AtomicInteger)
+
+echo "1. Checking for containers without versions..."
 fixOrphanedContainers
+
+echo "2. Checking for versions that cannot have containers mounted..."
+fixIncorrectlyImportedVersions
+
+echo "3. Checking for missing containers on versions..."
+fixMissingContainersOnVersions
+
+echo "Problems found and fixed:" ($FIX_COUNT toString)
